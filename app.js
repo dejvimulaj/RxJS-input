@@ -3,54 +3,84 @@ const { debounceTime, map, switchMap, catchError } = rxjs.operators;
 
 const input = document.getElementById('search-input');
 const resultsContainer = document.getElementById('autocomplete-results');
-
-// API Endpoints
+const inputBox = document.getElementById('inputBox')
 const endpoints = [
-    'https://catfact.ninja/fact',
-    'https://www.boredapi.com/api/activity',
-    'https://official-joke-api.appspot.com/random_joke'
+    'http://universities.hipolabs.com/search?name=',
+    'https://api.agify.io?name=',
+    'https://api.genderize.io?name='
 ];
 
-// Function to fetch data from each endpoint
+// Caching Mechanism
+const cache = new Map();
+
 const fetchData = (url) => {
+    if (cache.has(url)) {
+        return Promise.resolve(cache.get(url));
+    }
     return fetch(url)
         .then(response => response.json())
-        .catch(() => null); // Return null in case of error
+        .then(data => {
+            cache.set(url, data);
+            return data;
+        })
+        .catch(() => null);
 };
 
-// Function to combine results
 const combineResults = (responses) => {
     const combined = [];
+    const tempMap = new Map();
 
-    responses.forEach(response => {
-        if (!response) return; // Skip if response is null
+    responses.forEach((response, index) => {
+        if (!response) return;
 
-        if (response.fact) {
-            // Cat Facts API
-            combined.push(`Cat Fact: ${response.fact}`);
-        } else if (response.activity) {
-            // Bored API
-            combined.push(`Activity: ${response.activity}`);
-        } else if (response.setup && response.punchline) {
-            // Joke API
-            combined.push(`Joke: ${response.setup} - ${response.punchline}`);
+        if (index === 0 && Array.isArray(response)) {
+            response.forEach(university => {
+                const name = university.name;
+                if (!tempMap.has(name)) {
+                    tempMap.set(name, { name, source: 'University', country: university.country });
+                }
+            });
         }
+
+        if (index === 1 && response.age) {
+            const name = response.name;
+            if (tempMap.has(name)) {
+                tempMap.get(name).age = response.age;
+            } else {
+                tempMap.set(name, { name, source: 'Age', age: response.age });
+            }
+        }
+
+        if (index === 2 && response.gender) {
+            const name = response.name;
+            if (tempMap.has(name)) {
+                tempMap.get(name).gender = response.gender;
+            } else {
+                tempMap.set(name, { name, source: 'Gender', gender: response.gender });
+            }
+        }
+    });
+
+    tempMap.forEach(value => {
+        let result = `Name: ${value.name}`;
+        if (value.country) result += `, University in ${value.country}`;
+        if (value.age) result += `, Predicted Age: ${value.age}`;
+        if (value.gender) result += `, Predicted Gender: ${value.gender}`;
+        combined.push(result);
     });
 
     return combined;
 };
 
-// Observable for input events
 fromEvent(input, 'input')
     .pipe(
-        debounceTime(300),
+        debounceTime(400), 
         map(event => event.target.value.trim()),
         switchMap(query => {
-            if (!query) {
+            if (query.length < 3) {
                 return of([]);
             }
-            // Make simultaneous requests to all endpoints
-            const requests = endpoints.map(endpoint => fetchData(endpoint));
+            const requests = endpoints.map(endpoint => fetchData(endpoint + encodeURIComponent(query)));
             return forkJoin(requests).pipe(
                 map(combineResults),
                 catchError(() => of([]))
@@ -58,10 +88,9 @@ fromEvent(input, 'input')
         })
     )
     .subscribe(results => {
-        // Clear previous results
         resultsContainer.innerHTML = '';
-
-        // Display new results
+        resultsContainer.style.display = "block";
+        inputBox.classList.add("active");
         results.forEach(result => {
             const li = document.createElement('li');
             li.textContent = result;
